@@ -20,7 +20,7 @@ that ingests player data, computes similarity and valuation metrics through
 asynchronous pipelines, exposes versioned REST APIs, and uses AI to generate
 scouting reports from structured statistical analysis.
 
-## Status: In Progress (Day 1 of ~18)
+## Status: In Progress 
 
 This is an active build-in-public portfolio project. Current status:
 
