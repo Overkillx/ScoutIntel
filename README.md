@@ -25,7 +25,8 @@ scouting reports from structured statistical analysis.
 This is an active build-in-public portfolio project. Current status:
 
 - [x] Data acquisition + exploration
-- [ ] Postgres schema + ingestion pipeline
+- [x] Postgres schema + SQLAlchemy models
+- [ ] Data ingestion pipeline (CSV → Postgres)
 - [ ] Celery + Redis async job infrastructure
 - [ ] Vector similarity search (pgvector)
 - [ ] Undervalued-player detection

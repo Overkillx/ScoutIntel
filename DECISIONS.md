@@ -17,3 +17,21 @@ Data quality check:
 
 Note: player_positions is a multi-value string (e.g. "CDM, CM", "LM, RM, LW") —
 will need parsing into a primary position field for clean filtering in the API.
+
+
+## Day 2 — Schema design + Postgres setup
+
+Split player data into two tables: `players` (bio + market data — name, age,
+position, club, contract, value) and `player_stats` (performance attributes —
+overall, potential, pace/shooting/passing/dribbling/defending/physic).
+
+Reason: bio data changes rarely, while stats will be recomputed and potentially
+versioned over time once the vector/similarity pipeline is built (Day 6+).
+Separating them now avoids painful schema migrations later when stats start
+getting updated on a schedule.
+
+Used SQLAlchemy over raw SQL for models — gives type safety, easier to evolve
+schema via code, and integrates cleanly with FastAPI later.
+
+Environment note: `python` and `pip` pointed to different installs even inside
+the venv on this Mac — resolved by using `python3` explicitly for all scripts.
