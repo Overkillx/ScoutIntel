@@ -35,3 +35,18 @@ schema via code, and integrates cleanly with FastAPI later.
 
 Environment note: `python` and `pip` pointed to different installs even inside
 the venv on this Mac — resolved by using `python3` explicitly for all scripts.
+
+
+## Day 3 — Ingestion pipeline + FastAPI layer
+
+Built `ingest.py` as an idempotent upsert script — checks if a player_id
+already exists before inserting, updates instead of duplicating on re-run.
+Verified by running it twice: first run showed "Inserted: 18405, Updated: 0",
+second run showed "Inserted: 0, Updated: 18405" — confirms safe to re-run.
+
+Built FastAPI routes under /api/v1/players — versioned from the start so
+future breaking changes won't silently break existing consumers.
+
+Used SQLAlchemy Session dependency injection (get_db) rather than a global
+session — each request gets its own DB session, properly closed after,
+avoiding connection leaks under concurrent requests.
