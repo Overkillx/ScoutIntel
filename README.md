@@ -26,7 +26,8 @@ This is an active build-in-public portfolio project. Current status:
 
 - [x] Data acquisition + exploration
 - [x] Postgres schema + SQLAlchemy models
-- [ ] Data ingestion pipeline (CSV → Postgres)
+- [x] Data ingestion pipeline (CSV → Postgres)
+- [x] Basic FastAPI CRUD endpoints
 - [ ] Celery + Redis async job infrastructure
 - [ ] Vector similarity search (pgvector)
 - [ ] Undervalued-player detection
