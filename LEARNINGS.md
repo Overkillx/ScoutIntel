@@ -36,3 +36,60 @@ project-specific choices).
   is actually being used.
 - `/docs` (FastAPI's auto-generated Swagger UI) lets you test API endpoints
   interactively without needing a frontend or tools like Postman.
+
+
+## Day 4 — Data integrity, migrations, API correctness
+
+- **Latent vs live bugs.** A bug can be real without currently firing. Worth
+  checking which you have before fixing: "the dataset didn't trigger it, but
+  the code path was unsafe and the pipeline is scheduled" is a more precise
+  claim than implying you found a crash.
+- **NaN is not NULL.** Pandas represents missing numerics as `float('nan')`,
+  so `float()` doesn't raise on them. Postgres accepts NaN in a
+  `double precision` column, so the insert succeeds silently. NaN then loses
+  every comparison — `NaN <= x` and `NaN > x` are both false — so affected rows
+  disappear from filters without appearing anywhere else. NULL is the safe
+  representation: SQL aggregates skip it, so "unknown" doesn't contaminate
+  "known".
+- **Sentinel values vs NULL.** Storing `0` for "no data" is a real design
+  error, not a style choice — `0` asserts a fact ("worth nothing") where NULL
+  says "unknown", and `AVG` includes the former and skips the latter. Source
+  data often does this, and you have to decide whether to preserve or normalise
+  it.
+- **`create_all` is a bootstrap tool, not a migration tool.** It creates tables
+  that don't exist and does nothing to ones that do. It will never alter a
+  column or add a constraint, so a model change silently diverges from the live
+  schema.
+- **Migrations are version control for the database.** Alembic autogenerate
+  diffs your models against the live DB and writes the delta as a Python file
+  committed to git. Adopting it against a database that already matches your
+  models produces an empty baseline migration, which is the cheapest possible
+  time to start.
+- **Don't blindly trust autogenerate.** For an unnamed constraint it emits
+  `op.drop_constraint(None, ...)` in `downgrade()`, which fails at runtime —
+  there is no constraint called "None". Caught this by reading the generated
+  file before running it. Fix: name constraints explicitly in the model.
+- **Autogenerate deletes what it can't see.** It treats the models as the
+  source of truth, so anything present in the database but absent from the
+  models gets a `drop` in the next revision. Schema changes made by hand in
+  `psql` will get reverted by the next migration.
+- **Postgres has transactional DDL.** Schema changes run inside a transaction
+  and roll back cleanly on failure. MySQL doesn't — a failed migration there
+  can leave a half-applied schema.
+- **A unique constraint is backed by a btree index.** So enforcing uniqueness
+  on a foreign key also gives you the index for joins on it — a correctness fix
+  that's also a performance one.
+- **`is not None` vs truthiness for optional parameters.** `if x:` is false for
+  `0`, `""`, and `[]`, all of which may be legitimate user input. For anything
+  optional-and-numeric, test for `None` explicitly.
+- **HTTP status codes are part of the API contract.** Returning an error body
+  with a 200 means clients checking `response.ok` treat failure as success.
+  FastAPI's `HTTPException` sets the status properly.
+- **`.env` is read by Python, not by the shell.** `load_dotenv()` populates the
+  Python process's environment; zsh never sees those variables, so
+  `psql "$DATABASE_URL"` gets an empty string and falls back to connecting to a
+  database named after your user.
+- **Framework-generated files encode ordering assumptions.** In Alembic's
+  `env.py`, `config` doesn't exist until `config = context.config` runs, so
+  inserting config code near the imports raises `NameError`. Read what the
+  template is doing before adding to it.

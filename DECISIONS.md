@@ -50,3 +50,58 @@ future breaking changes won't silently break existing consumers.
 Used SQLAlchemy Session dependency injection (get_db) rather than a global
 session — each request gets its own DB session, properly closed after,
 avoiding connection leaks under concurrent requests.
+
+## Day 4 — Code review fixes + migration tooling
+
+Reviewed the existing code and found four bugs. Fixed them one at a time
+rather than in a single sweep, so each one is understood rather than just
+applied.
+
+**Null handling in ingest.** `value_eur` and `wage_eur` were cast with a bare
+`float()` while every neighbouring field guarded with `pd.notna`. Checked the
+data first: zero nulls in both columns today, so this was latent, not live.
+Fixed anyway — `ingest.py` will run on a schedule against future data (FC27,
+or the FBref merge on the v2 roadmap), and a NaN inserts into Postgres
+silently, then loses every comparison it appears in. A player with NaN value
+would vanish from a `max_value` filter without appearing in the complement,
+and one NaN poisons any league-level average. Cheap guard now, no stack trace
+later.
+
+**Zero-as-sentinel in the source data.** While checking the above: 89 players
+have `wage_eur == 0` — the same 89 with null `club_name` from Day 1, i.e. free
+agents with nobody paying them. But 109 have `value_eur == 0`, so 20 players
+have a club and a wage yet no market value. Cristiano Ronaldo (age 40, null
+club) is one of them. EA is using `0` where NULL would be correct. Decided to
+preserve their `0` as-is rather than normalising, because converting would
+misrepresent the source; documented here so the valuation model doesn't later
+rank these players as bargains. Revisit if undervalued-player detection starts
+surfacing them.
+
+**Adopted Alembic instead of hand-editing schema.** Day 2 justified splitting
+`players`/`player_stats` on the grounds that stats would be recomputed and
+versioned over time. That reasoning doesn't survive the first schema change
+happening by hand in `psql` with no trace in git. Also relevant: `create_all`
+only creates tables that don't exist — it will not alter an existing one, so
+adding a constraint to the model would have silently diverged from the live
+schema. Baselined against the existing database, which produced an empty first
+migration (models and schema already agreed). Doing this now means the pgvector
+column is the second migration rather than a special one-off.
+
+**Unique constraint on `player_stats.player_id`.** The model declared
+`uselist=False` — one stats row per player — but nothing in the database
+enforced it, so a partially failed ingest could have produced duplicates and
+SQLAlchemy would have silently returned whichever came back first. Checked for
+existing duplicates first (zero), then added the constraint via migration.
+Named it `uq_player_stats_player_id` explicitly rather than letting Postgres
+auto-assign, so the name is deterministic and in git. Kept the surrogate `id`
+primary key for now — it's redundant, since `player_id` would serve as the PK,
+but dropping a column is a destructive change and not worth bundling into this
+migration. Noted as a follow-up.
+
+**API correctness.** Optional numeric filters used `if max_age:` /
+`if max_value:`, which treat `0` as "not provided" — so `?max_value=0` dropped
+the filter and returned every player instead of the 109 zero-value ones.
+Changed to `is not None`. Separately, `get_player` returned
+`{"error": "Player not found"}` with HTTP 200, so a client checking
+`response.ok` would see success on a missing record. Now raises
+`HTTPException(404)`.
