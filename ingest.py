@@ -41,8 +41,8 @@ def load_data(csv_path="data/FC26_20250921.csv"):
             int(row["club_contract_valid_until_year"])
             if pd.notna(row["club_contract_valid_until_year"]) else None
         )
-        player.value_eur = float(row["value_eur"])
-        player.wage_eur = float(row["wage_eur"])
+        player.value_eur = float(row["value_eur"]) if pd.notna(row["value_eur"]) else None
+        player.wage_eur = float(row["wage_eur"]) if pd.notna(row["wage_eur"]) else None
         player.release_clause_eur = (
             float(row["release_clause_eur"]) if pd.notna(row["release_clause_eur"]) else None
         )
