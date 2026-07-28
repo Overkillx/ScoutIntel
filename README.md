@@ -79,5 +79,7 @@ NL search + AI scouting reports (LLM)
 
 ## Setup
 
-_(Coming as the project progresses — will include Docker Compose instructions
-once the backend and database layers are built.)_
+Requires PostgreSQL and a `DATABASE_URL` in `.env`.
+
+    alembic upgrade head     # create schema
+    python3 ingest.py        # load player data

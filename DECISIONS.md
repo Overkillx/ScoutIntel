@@ -105,3 +105,12 @@ Changed to `is not None`. Separately, `get_player` returned
 `{"error": "Player not found"}` with HTTP 200, so a client checking
 `response.ok` would see success on a missing record. Now raises
 `HTTPException(404)`.
+
+## Open items (known, deferred)
+
+- `player_stats.id` is a redundant surrogate key — `player_id` would serve as
+  the primary key. Dropping it is destructive; deferred.
+- `ingest.py` upserts row by row (~37k queries for 18,405 players). Should be
+  a bulk `on_conflict_do_update` before the nightly scheduler calls it.
+- No `requirements.txt` — the repo can't currently be run from a clone.
+- API routes build response dicts by hand; no Pydantic response models.
