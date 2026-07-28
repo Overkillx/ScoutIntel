@@ -41,6 +41,9 @@ This is an active build-in-public portfolio project. Current status:
 - [ ] requirements.txt (repo not yet runnable from a fresh clone)
 
 See `DECISIONS.md` for the reasoning behind each engineering choice as they're made.
+Note: an early code review pass caught and fixed 4 real correctness bugs
+(NaN handling, missing DB constraints, HTTP semantics) — see DECISIONS.md
+"Open items" and the Day 3-4 entries for details.
 
 ## Data
 
