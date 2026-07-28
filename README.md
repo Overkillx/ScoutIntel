@@ -28,6 +28,7 @@ This is an active build-in-public portfolio project. Current status:
 - [x] Postgres schema + SQLAlchemy models
 - [x] Data ingestion pipeline (CSV → Postgres)
 - [x] Basic FastAPI CRUD endpoints
+- [x] Database migrations (Alembic)
 - [ ] Celery + Redis async job infrastructure
 - [ ] Vector similarity search (pgvector)
 - [ ] Undervalued-player detection
@@ -37,6 +38,7 @@ This is an active build-in-public portfolio project. Current status:
 - [ ] Natural language search (LLM-powered)
 - [ ] AI-generated scouting reports
 - [ ] Tests + CI (GitHub Actions)
+- [ ] requirements.txt (repo not yet runnable from a fresh clone)
 
 See `DECISIONS.md` for the reasoning behind each engineering choice as they're made.
 
