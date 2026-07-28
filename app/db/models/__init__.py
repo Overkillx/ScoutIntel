@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -39,5 +39,7 @@ class PlayerStats(Base):
     dribbling = Column(Float, nullable=True)
     defending = Column(Float, nullable=True)
     physic = Column(Float, nullable=True)
+    __table_args__ = (UniqueConstraint("player_id", name="uq_player_stats_player_id"),)
+
 
     player = relationship("Player", back_populates="stats")
