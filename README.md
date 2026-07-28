@@ -20,13 +20,14 @@ that ingests player data, computes similarity and valuation metrics through
 asynchronous pipelines, exposes versioned REST APIs, and uses AI to generate
 scouting reports from structured statistical analysis.
 
-## Status: In Progress (Day 1 of ~18)
+## Status: In Progress 
 
 This is an active build-in-public portfolio project. Current status:
 
 - [x] Data acquisition + exploration
 - [x] Postgres schema + SQLAlchemy models
-- [ ] Data ingestion pipeline (CSV → Postgres)
+- [x] Data ingestion pipeline (CSV → Postgres)
+- [x] Basic FastAPI CRUD endpoints
 - [ ] Celery + Redis async job infrastructure
 - [ ] Vector similarity search (pgvector)
 - [ ] Undervalued-player detection
