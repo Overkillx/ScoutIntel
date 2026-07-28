@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import SessionLocal
@@ -26,9 +26,9 @@ def get_players(
 
     if position:
         query = query.filter(Player.primary_position == position.upper())
-    if max_age:
+    if max_age is not None :
         query = query.filter(Player.age <= max_age)
-    if max_value:
+    if max_value is not None :
         query = query.filter(Player.value_eur <= max_value)
     if foot:
         query = query.filter(Player.preferred_foot.ilike(foot))
@@ -54,7 +54,7 @@ def get_players(
 def get_player(player_id: int, db: Session = Depends(get_db)):
     player = db.query(Player).filter(Player.player_id == player_id).first()
     if not player:
-        return {"error": "Player not found"}
+        raise HTTPException(status_code=404, detail="Player not found")
 
     stats = db.query(PlayerStats).filter(PlayerStats.player_id == player_id).first()
 
