@@ -114,3 +114,20 @@ Changed to `is not None`. Separately, `get_player` returned
   a bulk `on_conflict_do_update` before the nightly scheduler calls it.
 - No `requirements.txt` — the repo can't currently be run from a clone.
 - API routes build response dicts by hand; no Pydantic response models.
+
+## Day 4 — Repositioning after data-premise review
+
+Ran a correlation check: value_eur vs overall (r=0.55), potential (r=0.50),
+age (r=0.02). Confirms value_eur is meaningfully but not fully derived from
+these attributes (~25-30% variance explained) — real circularity risk for a
+"stats vs value = undervalued" claim, but not total circularity.
+
+Decision: dropped "undervalued player detection" as the headline feature.
+Reframed the project around similarity search, which has no dependency on
+value_eur and is fully defensible. Value-relative ranking may be added later
+as an explicitly caveated secondary signal, not a market-inefficiency claim.
+
+Also cut roadmap scope: prioritizing pgvector similarity + Docker Compose +
+tests over adding more partially-wired features (Celery beat, caching, rate
+limiting, NL search, AI reports) — a smaller complete system is a stronger
+portfolio artifact than a wider incomplete one.
