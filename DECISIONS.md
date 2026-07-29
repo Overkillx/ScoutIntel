@@ -131,3 +131,71 @@ Also cut roadmap scope: prioritizing pgvector similarity + Docker Compose +
 tests over adding more partially-wired features (Celery beat, caching, rate
 limiting, NL search, AI reports) — a smaller complete system is a stronger
 portfolio artifact than a wider incomplete one.
+
+## Day 6 — Vector similarity search (pgvector)
+
+**Two vector tables, not one.** `player_vectors` (outfield, `vector(18)`) and
+`goalkeeper_vectors` (GK, `vector(6)`), rather than a single table with
+nulls. pgvector columns have fixed dimensionality, and outfield/GK attribute
+spaces aren't comparable — a GK's `defending_standing_tackle` is meaningless,
+an outfielder has no `goalkeeping_reflexes`. Padding one schema to fit the
+other would make the unused dimensions arbitrary tie-breakers in cosine
+distance rather than real signal.
+
+**Attribute selection.** Ran a pairwise correlation check over all 30
+granular FC26 attributes. Dropped near-duplicates above r=0.85 — the
+defending cluster (`standing_tackle` / `sliding_tackle` / `marking_awareness`
+/ `interceptions`) correlated 0.95-0.98, kept one representative
+(`defending_standing_tackle`). Exception: kept both `skill_dribbling` and
+`skill_ball_control` despite r=0.95, because they're conceptually distinct
+(beating a man vs. first touch) and dribbling is a meaningful stylistic
+descriptor, not just redundant signal. Landed on 18 outfield attributes, 6 GK
+attributes (all `goalkeeping_*`).
+
+Excluded `overall`, `potential`, `value_eur` from both vectors — these are
+quality/valuation judgments, not playing style. Including them would make
+"similar" mean "similar tier" rather than "similar style", collapsing the
+feature into a worse version of sorting by `overall`.
+
+**Computed from the CSV directly, not from new Postgres columns.**
+`player_stats` intentionally only carries the 6 aggregate attributes (Day 2).
+The 30 granular attributes have exactly one consumer — this vector
+computation — so `compute_vectors.py` reads `data/FC26_*.csv` itself (same
+pattern as `ingest.py`) rather than the migration adding 24 columns to
+`player_stats` just to be read back once. `primary_position` is still pulled
+from the `players` table rather than re-derived from the CSV, so there's one
+source of truth for it. Z-scoring happens at write time — the dataset is a
+static snapshot, so there's no staleness cost. If this becomes a live feed,
+z-scoring moves to a scheduled recompute job, but that job would still be
+re-reading a fresh CSV/feed at that point, so a Postgres staging table isn't
+actually skipped by adding it now — it'd just be unused until then.
+
+**`player_id` as the primary key on both vector tables**, not a surrogate
+`id`. `player_stats.id` is a documented open item — a redundant surrogate key
+that should have been `player_id` — not worth a destructive migration to fix
+now. New tables don't need to repeat that mistake.
+
+**HNSW over IVFFlat for the index.** HNSW needs no separate build/train step
+and pgvector's own guidance favors it for read-heavy workloads, which
+matches a static snapshot with no write churn. IVFFlat needs a `lists`
+parameter tuned to row count and improves with more data over time — neither
+applies here. Benchmarked with `EXPLAIN ANALYZE` on the 16,343-row
+`player_vectors` table: HNSW index scan took 0.766ms vs. 7.272ms for a forced
+sequential scan (`enable_indexscan/bitmapscan = off`) — about 9.5x faster,
+and the gap widens as the table grows since seq scan cost is linear in row
+count while HNSW is sub-linear.
+
+**Position-group filtering before ranking, not exact-position filtering.**
+`GET /players/{id}/similar` filters candidates to the same group
+(defenders / midfielders / attackers / goalkeepers), derived from the
+existing `primary_position` field via a lookup table, rather than requiring
+an exact position match. A CAM and a CM are both creative central
+midfielders — filtering to exact position would exclude legitimately similar
+players over a labeling technicality the vector itself is supposed to look
+past.
+
+**GK requests route automatically, not via error.** If the requested player
+is a goalkeeper, the endpoint queries `goalkeeper_vectors` instead of
+`player_vectors` automatically, rather than 400-ing and requiring the client
+to know which table applies. The two-table split is an implementation
+decision the API shouldn't leak.

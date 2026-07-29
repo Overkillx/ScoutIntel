@@ -93,3 +93,34 @@ project-specific choices).
   `env.py`, `config` doesn't exist until `config = context.config` runs, so
   inserting config code near the imports raises `NameError`. Read what the
   template is doing before adding to it.
+
+## Day 6 — Vector search
+
+- **Z-scoring vs. correlation are different questions.** Correlation
+  (attribute selection) asks "does this dimension carry information the
+  others don't already carry" — high correlation means redundant signal.
+  Z-scoring (normalization) asks "are these dimensions on comparable scales"
+  — without it, an attribute with a wider raw range would dominate cosine
+  distance for reasons that have nothing to do with actual similarity.
+  Both matter, and they're solving different problems.
+- **Cosine distance vs. cosine similarity.** Similarity ranges -1 to 1 (1 =
+  identical direction). pgvector's `<=>` operator returns distance, i.e.
+  `1 - similarity` for normalized vectors, so 0 = identical and it sorts
+  ascending for "most similar first" — no need to flip the sort order or
+  negate anything.
+- **A vector index changes ordering strategy, not correctness.** Without an
+  index, "nearest 10" is exact: compute distance to every row, sort, take the
+  top N. HNSW is approximate nearest-neighbor — it trades a small chance of
+  missing the true nearest point for skipping most of the table. For ~16K
+  rows the accuracy cost is negligible and the speed difference is already
+  measurable (0.766ms vs 7.272ms via `EXPLAIN ANALYZE`); the gap would matter
+  more at larger scale, not less.
+- **HNSW vs. IVFFlat is a build-cost/query-cost tradeoff, not "always pick
+  the newer one."** IVFFlat clusters vectors into lists at index-build time
+  and needs enough existing data to cluster well; HNSW builds a navigable
+  graph incrementally with no training phase. The right choice depends on
+  whether the data is static or growing, not which algorithm is newer.
+- **`SET enable_indexscan = off` is a real technique for isolating index
+  impact**, not just a curiosity — it forces the planner to consider only
+  sequential scans without having to actually drop and recreate the index,
+  making an honest with/without benchmark cheap to run.

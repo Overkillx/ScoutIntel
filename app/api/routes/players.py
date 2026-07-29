@@ -2,9 +2,20 @@ from fastapi import APIRouter, Query, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import SessionLocal
-from app.db.models import Player, PlayerStats
+from app.db.models import Player, PlayerStats, PlayerVector, GoalkeeperVector
 
 router = APIRouter(prefix="/api/v1/players", tags=["players"])
+
+# Position group used to filter similarity candidates. Derived from
+# primary_position rather than stored separately, so it can't drift out
+# of sync with the source field.
+POSITION_GROUPS = {
+    "GK": "goalkeepers",
+    "CB": "defenders", "LB": "defenders", "RB": "defenders",
+    "CDM": "midfielders", "CM": "midfielders", "CAM": "midfielders",
+    "LM": "midfielders", "RM": "midfielders",
+    "LW": "attackers", "RW": "attackers", "ST": "attackers",
+}
 
 def get_db():
     db = SessionLocal()
@@ -81,3 +92,51 @@ def get_player(player_id: int, db: Session = Depends(get_db)):
             "physic": stats.physic if stats else None,
         } if stats else None,
     }
+
+
+@router.get("/{player_id}/similar")
+def get_similar_players(
+    player_id: int,
+    limit: int = Query(default=10, le=50),
+    db: Session = Depends(get_db),
+):
+    player = db.query(Player).filter(Player.player_id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    group = POSITION_GROUPS.get(player.primary_position)
+    if group is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unrecognized position '{player.primary_position}', can't determine position group",
+        )
+
+    vector_model = GoalkeeperVector if group == "goalkeepers" else PlayerVector
+
+    target = db.query(vector_model).filter(vector_model.player_id == player_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="No similarity vector computed for this player")
+
+    position_filter = [pos for pos, g in POSITION_GROUPS.items() if g == group]
+    distance = vector_model.embedding.cosine_distance(target.embedding).label("distance")
+
+    results = (
+        db.query(Player, distance)
+        .join(vector_model, vector_model.player_id == Player.player_id)
+        .filter(Player.primary_position.in_(position_filter))
+        .filter(Player.player_id != player_id)
+        .order_by(distance)
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "player_id": p.player_id,
+            "name": p.short_name,
+            "position": p.primary_position,
+            "club": p.club_name,
+            "distance": float(dist),
+        }
+        for p, dist in results
+    ]

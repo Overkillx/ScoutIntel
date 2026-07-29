@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship, declarative_base
+from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
 
@@ -43,3 +44,17 @@ class PlayerStats(Base):
 
 
     player = relationship("Player", back_populates="stats")
+
+
+class PlayerVector(Base):
+    __tablename__ = "player_vectors"
+
+    player_id = Column(Integer, ForeignKey("players.player_id"), primary_key=True)
+    embedding = Column(Vector(18), nullable=False)
+
+
+class GoalkeeperVector(Base):
+    __tablename__ = "goalkeeper_vectors"
+
+    player_id = Column(Integer, ForeignKey("players.player_id"), primary_key=True)
+    embedding = Column(Vector(6), nullable=False)
