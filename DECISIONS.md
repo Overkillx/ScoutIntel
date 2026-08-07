@@ -132,6 +132,89 @@ tests over adding more partially-wired features (Celery beat, caching, rate
 limiting, NL search, AI reports) — a smaller complete system is a stronger
 portfolio artifact than a wider incomplete one.
 
+## Day 5 — Runnability, Docker Compose, and a real migration bug
+
+**requirements.txt built from the import graph, not memory.** Grepped every
+`import`/`from` line across `app/`, `ingest.py`, `compute_vectors.py`, and
+`alembic/`, then cross-referenced against what's actually installed in the
+project venv (which has been accumulating packages organically since Day 2).
+Pinned to those proven-working versions rather than latest, since "installs
+today" and "known to work with this code" aren't the same guarantee. Split
+`pytest`/`httpx` into `requirements-dev.txt` — the production image installs
+only `requirements.txt`, so a test framework never ships in the runtime
+image. Verified by creating a brand-new venv (not the dev one) and importing
+every module cleanly before trusting the split.
+
+**Docker Compose: Postgres (pgvector image) + Redis + API.** Redis is
+provisioned now with nothing reading or writing to it yet — caching is the
+next feature, and standing up infra twice for the same service is wasted
+motion. The entrypoint script waits on `pg_isready -d "$DATABASE_URL"`
+before running `alembic upgrade head`, not on container-started state —
+Compose's `depends_on` (even with a healthcheck) only gates container
+scheduling order, not "the database inside is actually ready to accept a
+connection," and those are different moments. `pg_isready` accepting a full
+connection URI via `-d` meant the entrypoint didn't need `POSTGRES_HOST`/
+`POSTGRES_PORT`/`POSTGRES_USER` as separate variables — `DATABASE_URL`
+stays the single source of truth, same as it already is for `session.py`
+and `alembic/env.py`.
+
+**Found a real port collision while verifying the stack.** This machine
+already has a local (non-Docker) Postgres bound to `127.0.0.1:5432` and
+`::1:5432`. Docker's published port bound `0.0.0.0:5432` successfully —
+no "address in use" error — but any client connecting to `localhost:5432`
+still reached the local Postgres, not the container, because the kernel
+prefers the more specific bind over the wildcard one. Caught this because
+the container Postgres has a `scoutintel` role that the local one doesn't,
+so the connection failed loudly ("role does not exist") instead of quietly
+touching the wrong database — but on a setup where the roles happened to
+match, this would have silently pointed dev traffic at the wrong Postgres.
+Fixed by publishing on `5433` instead of `5432` in `.env.example`, so the
+stack doesn't depend on the host having port 5432 free.
+
+**The baseline migration was a silent no-op — caught it before it shipped.**
+Spun up a genuinely empty Postgres (fresh Docker volume, not the dev
+database anything had touched) and ran `alembic upgrade head` for real,
+rather than trusting that three migration files existing meant three
+migrations worked. It failed on the second migration —
+`relation "player_stats" does not exist` — because the first migration's
+`upgrade()` was literally `pass`. Root cause: Day 4 baselined Alembic
+against a dev database that already had `players`/`player_stats` (created
+earlier by `Base.metadata.create_all()`, per Day 2, before Alembic was
+adopted). Alembic diffed the models against that database, found no
+difference, and honestly emitted an empty migration — correct for that one
+database's history, silently wrong as the *first* migration in anyone
+else's. Fixed by replacing the empty `upgrade()`/`downgrade()` with the
+actual `CREATE TABLE` statements for both tables as they existed at that
+point (pre unique-constraint, which the next migration still adds
+separately). Re-ran against a fresh volume afterward: all three migrations
+applied cleanly, all five expected tables existed
+(`players`, `player_stats`, `player_vectors`, `goalkeeper_vectors`,
+`alembic_version`).
+
+**Tests use a second database with transaction-per-test rollback, not
+cleanup logic.** `tests/conftest.py` derives `scoutintel_test` from
+`DATABASE_URL` (or reads `TEST_DATABASE_URL` if set), drops/recreates it
+once per test session, and runs `alembic upgrade head` against it via
+subprocess — so the test suite exercises the same migration path
+production does, not `create_all`. Each individual test gets its own
+connection with `connection.begin()`, a session bound to that connection,
+and a rollback in teardown; `get_db` is overridden via
+`app.dependency_overrides` to hand the app that same session. No test ever
+commits, so nothing needs deleting between tests and tests can run in any
+order without interfering with each other. Verified this actually works
+(not just "looks right") by running the full suite twice in a row — a
+leaked transaction would show up as duplicate-key errors on the second run.
+
+**Verified over real HTTP too, not just TestClient.** `TestClient` talks to
+the app in-process over ASGI — it would never have caught the port
+collision above, since it never opens a real socket. After the automated
+suite passed, seeded a running containerized server with a handful of rows
+by hand and hit `/api/v1/players/?max_value=0`, a missing player, and
+`/players/{id}/similar` (same-group hit, cross-group near-neighbor
+exclusion, GK auto-routing, 422, 404) with `curl` against
+`localhost:8000`. Same results as the test suite, confirming the dependency
+override in tests isn't hiding something that only works in-process.
+
 ## Day 6 — Vector similarity search (pgvector)
 
 **Two vector tables, not one.** `player_vectors` (outfield, `vector(18)`) and

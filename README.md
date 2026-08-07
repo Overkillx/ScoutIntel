@@ -12,15 +12,13 @@ means manually cross-referencing stats across sources by hand.
 ## What This Is
 
 ScoutIntel ingests player data, computes attribute-based similarity vectors
-through an asynchronous background pipeline, and exposes the results through
-a versioned REST API. Given a player, it finds statistically similar players —
-a "find me players like X" tool, backed by real vector search infrastructure
-rather than a lookup table.
+via pgvector, and exposes the results through a versioned REST API. Given a
+player, it finds statistically similar players — a "find me players like X"
+tool, backed by real vector search infrastructure rather than a lookup table.
 
 **One-liner:** ScoutIntel is a backend platform that ingests football player
-data, computes attribute-based similarity using vector embeddings and
-asynchronous processing, and exposes the results through a versioned,
-tested REST API.
+data, computes attribute-based similarity using vector embeddings, and
+exposes the results through a versioned, tested REST API.
 
 ## Status: In Progress
 
@@ -31,15 +29,20 @@ This is an active build-in-public portfolio project. Current status:
 - [x] Data ingestion pipeline (CSV → Postgres)
 - [x] Basic FastAPI CRUD endpoints
 - [x] Database migrations (Alembic)
-- [ ] requirements.txt (repo not yet runnable from a fresh clone)
-- [ ] Vector similarity search (pgvector) — current focus
-- [ ] Docker Compose (full stack runnable from a clone)
+- [x] Vector similarity search (pgvector)
+- [x] requirements.txt / requirements-dev.txt (repo runnable from a fresh clone)
+- [x] Docker Compose (Postgres + pgvector, Redis, API — full stack runnable from a clone)
+- [x] Tests (pytest, isolated test DB, transaction-per-test rollback)
 - [ ] Pydantic response models
-- [ ] Tests + CI (GitHub Actions)
+- [ ] CI (GitHub Actions)
 
-Note: an early code review pass caught and fixed 4 real correctness bugs
-(NaN handling, missing DB constraints, HTTP semantics) — see DECISIONS.md
-"Open items" and the Day 3-4 entries for details.
+Notes:
+- An early code review pass caught and fixed 4 real correctness bugs (NaN
+  handling, missing DB constraints, HTTP semantics) — see DECISIONS.md
+  "Open items" and the Day 3-4 entries for details.
+- Verifying migrations against a genuinely empty database (Day 5) caught a
+  silent no-op baseline migration that would have broken any fresh clone —
+  see DECISIONS.md Day 5 for the root cause and fix.
 
 See `DECISIONS.md` for the reasoning behind each engineering choice as they're made,
 and `LEARNINGS.md` for concepts learned along the way.
@@ -66,18 +69,25 @@ Player data sourced from a public EA FC26 player database (Kaggle), containing
 ## Tech Stack
 
 **Backend:** FastAPI, PostgreSQL, SQLAlchemy, Alembic, pgvector
-**Async processing:** Celery, Redis
-**DevOps:** Docker, Docker Compose, GitHub Actions
+**DevOps:** Docker, Docker Compose
+**Testing:** pytest
+
+Redis is provisioned in Docker Compose but not yet used by any code — it's
+infra for the caching layer on the roadmap, added now so it doesn't require
+another infra change later.
 
 ## Architecture
 
-CSV → Cleaning → Postgres → Celery background job
+CSV → ingest.py → Postgres (players, player_stats)
 ↓
-Attribute vector computation (pgvector)
+compute_vectors.py → pgvector (player_vectors, goalkeeper_vectors)
 ↓
 REST API (FastAPI, versioned)
 ↓
 GET /players/{id}/similar
+
+`ingest.py` and `compute_vectors.py` are run manually today, not on a
+schedule — see Roadmap.
 
 ## Roadmap (Deferred, Not Built Yet)
 
@@ -85,7 +95,8 @@ Deliberately scoped out to keep the current build small and complete rather
 than wide and half-finished:
 
 - Redis caching layer, rate limiting
-- Nightly scheduler (Celery beat)
+- Nightly scheduler for ingest/vector recompute (Celery beat, or simpler)
+- CI (GitHub Actions) running the test suite on push
 - Natural language search (LLM-powered query parsing)
 - AI-generated scouting reports
 - Authentication (JWT), user accounts, saved searches, shortlists
@@ -96,5 +107,44 @@ than wide and half-finished:
 
 ## Setup
 
-_(Coming once Docker Compose and requirements.txt are added — will include
-full instructions to run the stack from a fresh clone.)_
+Requires Docker and Docker Compose.
+
+```bash
+git clone <repo-url>
+cd ScoutIntel
+cp .env.example .env
+docker compose up -d --build
+```
+
+This starts Postgres (with pgvector) and Redis, waits for Postgres to
+actually accept connections, runs `alembic upgrade head`, then starts the
+API at `http://localhost:8000` (`/docs` for interactive Swagger UI).
+
+`.env.example` defaults Postgres to host port **5433**, not 5432 — this
+avoids silently colliding with a Postgres already running locally on the
+default port (see DECISIONS.md Day 5). Adjust `POSTGRES_PORT`/`API_PORT`/
+`REDIS_PORT` in `.env` if those also collide with something on your machine.
+
+### Loading data
+
+The CSV in `data/` isn't committed (see `.gitignore`) — put your own FC26
+export there, then:
+
+```bash
+docker compose exec api python ingest.py
+docker compose exec api python compute_vectors.py
+```
+
+### Running tests
+
+Tests need `requirements-dev.txt` and a Postgres reachable from the host
+(the Docker Compose Postgres, published on `POSTGRES_PORT`, works):
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements-dev.txt
+TEST_DATABASE_URL=postgresql://scoutintel:scoutintel@localhost:5433/scoutintel_test pytest
+```
+
+Tests create/drop a separate `scoutintel_test` database and roll back each
+test's transaction — they never write to the dev database in `.env`.
