@@ -32,5 +32,18 @@ services:
     volumes:
       - ./data:/app/data
 
+  worker:
+    build: .
+    entrypoint: ["sh", "./worker_entrypoint.sh"]
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+
 volumes:
   postgres_data:

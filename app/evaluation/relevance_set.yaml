@@ -1,0 +1,28 @@
+# Relevance set for offline similarity-ranking evaluation.
+#
+# *** PLACEHOLDER DATA -- REPLACE WITH CURATED LABELS ***
+# The 3 entries below exist only to exercise the loader/format end-to-end.
+# They were NOT hand-judged for tactical/stylistic similarity and must
+# never be used to score or compare v1 vs v2 -- doing so would make the
+# evaluation circular (judging a model's output against labels that were
+# never independently curated), the same failure mode already documented
+# for value_eur (r=0.55 against overall) in DECISIONS.md.
+#
+# Format: query player_id -> list of relevant player_ids. Both sides are
+# keyed by players.player_id (the PK) rather than short_name, since
+# short_name is not unique. short_name is included as a trailing comment
+# only, for human readability while editing -- it is never parsed.
+
+dataset_name: placeholder_v0
+
+relevance:
+  231747:  # K. Mbappé (PLACEHOLDER -- not a curated judgment)
+    - 239085  # E. Haaland
+    - 238794  # Vini Jr.
+
+  239085:  # E. Haaland (PLACEHOLDER -- not a curated judgment)
+    - 231747  # K. Mbappé
+
+  252371:  # J. Bellingham (PLACEHOLDER -- not a curated judgment)
+    - 256630  # F. Wirtz
+    - 251854  # Pedri

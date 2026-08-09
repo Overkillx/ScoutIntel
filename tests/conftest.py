@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.api.routes.players import get_db
+from app.db.session import get_db
 from app.db.models import GoalkeeperVector, Player, PlayerStats, PlayerVector
 from app.main import app
 

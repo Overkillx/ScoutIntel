@@ -1,4 +1,14 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import relationship, declarative_base
 from pgvector.sqlalchemy import Vector
 
@@ -58,3 +68,49 @@ class GoalkeeperVector(Base):
 
     player_id = Column(Integer, ForeignKey("players.player_id"), primary_key=True)
     embedding = Column(Vector(6), nullable=False)
+
+
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model_version = Column(String, nullable=False)
+    dataset_name = Column(String, nullable=False)
+    # SHA-256 of the relevance set's content (dataset_name + every
+    # query -> relevant_ids judgment). Two runs must not be compared
+    # head-to-head unless this matches -- see relevance_set_fingerprint().
+    dataset_fingerprint = Column(String, nullable=False)
+    k = Column(Integer, nullable=False)
+    num_queries = Column(Integer, nullable=False)
+    num_errors = Column(Integer, nullable=False)
+    mean_precision_at_k = Column(Float, nullable=True)
+    mean_recall_at_k = Column(Float, nullable=True)
+    mean_ndcg_at_k = Column(Float, nullable=True)
+    mean_position_consistency = Column(Float, nullable=True)
+    self_similarity_violation_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    query_results = relationship(
+        "EvaluationQueryResult", back_populates="run", cascade="all, delete-orphan"
+    )
+
+
+class EvaluationQueryResult(Base):
+    __tablename__ = "evaluation_query_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    evaluation_run_id = Column(
+        Integer, ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    query_player_id = Column(Integer, ForeignKey("players.player_id"), nullable=False)
+    # "ok" | "player_not_found" | "unrecognized_position" | "no_vector"
+    status = Column(String, nullable=False)
+    precision_at_k = Column(Float, nullable=True)
+    recall_at_k = Column(Float, nullable=True)
+    ndcg_at_k = Column(Float, nullable=True)
+    position_consistency = Column(Float, nullable=True)
+    self_similarity_violation = Column(Boolean, nullable=True)
+    num_relevant = Column(Integer, nullable=False, default=0)
+    num_ranked = Column(Integer, nullable=False, default=0)
+
+    run = relationship("EvaluationRun", back_populates="query_results")
