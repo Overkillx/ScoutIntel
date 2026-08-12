@@ -1,28 +1,70 @@
 # Relevance set for offline similarity-ranking evaluation.
 #
-# *** PLACEHOLDER DATA -- REPLACE WITH CURATED LABELS ***
-# The 3 entries below exist only to exercise the loader/format end-to-end.
-# They were NOT hand-judged for tactical/stylistic similarity and must
-# never be used to score or compare v1 vs v2 -- doing so would make the
-# evaluation circular (judging a model's output against labels that were
-# never independently curated), the same failure mode already documented
-# for value_eur (r=0.55 against overall) in DECISIONS.md.
+# Hand-curated by one person (project author) from football knowledge, not
+# derived from any model's output or any external dataset -- kept
+# independent so scoring against it isn't circular (the same failure mode
+# already documented for value_eur (r=0.55 against overall) in
+# DECISIONS.md). Still a single person's subjective judgment on a small
+# set of players, not a ground-truth benchmark -- treat results as
+# indicative, not definitive.
+#
+# Judgments lean toward same-position/same-role similarity (e.g. Rodri's
+# relevant set is other elite defensive midfielders), which is a real bias
+# to keep in mind when interpreting v1 vs v2: v2's relaxed outfield filter
+# is designed to deviate from same-position similarity on purpose, so this
+# relevance set may structurally favor v1.
 #
 # Format: query player_id -> list of relevant player_ids. Both sides are
 # keyed by players.player_id (the PK) rather than short_name, since
 # short_name is not unique. short_name is included as a trailing comment
 # only, for human readability while editing -- it is never parsed.
 
-dataset_name: placeholder_v0
+dataset_name: curated_v1
 
 relevance:
-  231747:  # K. Mbappé (PLACEHOLDER -- not a curated judgment)
-    - 239085  # E. Haaland
-    - 238794  # Vini Jr.
+  231866:  # Rodri
+    - 248148  # Zubimendi
+    - 256079  # M. Caicedo
+    - 241096  # S. Tonali
+    - 234378  # D. Rice
+    - 250959  # A. Stiller
+    - 272834  # João Neves
 
-  239085:  # E. Haaland (PLACEHOLDER -- not a curated judgment)
-    - 231747  # K. Mbappé
+  252371:  # J. Bellingham
+    - 239053  # F. Valverde
+    - 247090  # E. Fernández
+    - 236772  # D. Szoboszlai
 
-  252371:  # J. Bellingham (PLACEHOLDER -- not a curated judgment)
-    - 256630  # F. Wirtz
-    - 251854  # Pedri
+  251854:  # Pedri
+    - 255253  # Vitinha (PSG)
+    - 222665  # M. Ødegaard
+    - 218667  # Bernardo Silva
+
+  277643:  # Lamine Yamal
+    - 247827  # M. Olise
+    - 246669  # B. Saka
+
+  239085:  # E. Haaland
+    - 260592  # B. Šeško
+    - 232293  # V. Osimhen
+
+  202126:  # H. Kane
+    - 188545  # R. Lewandowski
+
+  212218:  # A. Laporte
+    - 278046  # Pau Cubarsí
+    - 245037  # Eric García
+
+  246420:  # J. Doku
+    - 256516  # Nico Williams (LM)
+    - 78012   # Y. Diomande (LM)
+
+  235212:  # A. Hakimi
+    - 232656  # T. Hernández
+    - 252145  # Nuno Mendes
+    - 210514  # João Cancelo
+
+  203376:  # V. van Dijk
+    - 243715  # W. Saliba
+    - 232580  # Gabriel (Magalhães)
+    - 256196  # W. Pacho

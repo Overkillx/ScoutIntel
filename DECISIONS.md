@@ -567,3 +567,85 @@ and the pytest test DB had it), so the first live dispatch failed with
 against the dev DB, re-dispatched, confirmed success, then deleted the
 one smoke-test row afterward (`ON DELETE CASCADE` took its
 `evaluation_query_results` row with it) so no fake data was left behind.
+
+
+## Day 10 — v2 trait-weighted similarity + honest v1/v2 comparison
+
+**`MODEL_REGISTRY` (`app/evaluation/runner.py`) maps `model_version` ->
+ranking function, resolved once per `run_evaluation()` call rather than
+per query.** `{"v1_vector": rank_similar, "v2_tactical": rank_similar_v2}`.
+An unrecognized `model_version` raises `UnknownModelVersionError`
+immediately, before any query runs, instead of failing query-by-query or
+silently defaulting -- a typo in the label should fail loud and fast, not
+produce a partial or misleading result set. `_score_query()` takes the
+resolved function as a parameter rather than looking it up itself, so the
+registry lookup and its failure mode live in exactly one place.
+
+**`rank_similar_v2` is a separate function, not a parameterized `rank_similar`.**
+v1 stays byte-for-byte unchanged (verified: existing test suite green,
+unmodified, after v2 landed) -- a shared parameterized implementation would
+have meant every future change to v2's ranking logic carries a chance of
+perturbing v1's behavior, defeating the entire point of having a stable
+baseline to score v2 against.
+
+**Trait weighting blends two sources, each independently min-max
+normalized to [0, 1] BEFORE blending -- not after.** `final_weight[i] =
+alpha * norm(position_baseline[i]) + (1 - alpha) * norm(player_strengths[i])`.
+The position baseline (`POSITION_GROUP_TRAIT_WEIGHTS`) is small hand-set
+integers (1-3, documented as "low/high relevance" proxies, not fit or
+learned); player strengths come from the query player's own 18-dim
+z-scored embedding, which is unbounded and signed. Blending those two
+raw scales directly would make `alpha` meaningless -- a raw z-score of
+2.5 would dominate a raw baseline score of 3 for reasons that have
+nothing to do with `alpha`'s intended 50/50 (or whatever ratio) split.
+Normalizing each source to [0, 1] independently first means `alpha` is
+actually the mixing ratio it claims to be. Player strengths specifically
+use min-max, not the z-scores directly, because z-scores can be negative
+and a negative *weight* is meaningless in a weighted cosine distance --
+min-max maps each player's own weakest dim to 0 and strongest to 1,
+preserving relative order without sign problems. Degenerate (all-equal)
+input to either source maps to uniform weight 1.0 rather than 0 --
+collapsing to zero would silently zero out that entire term of the blend
+whenever a population happened to be flat on some dim, rather than
+falling back to "no information, weight everything equally."
+
+**Outfield position filter is relaxed to the whole non-GK pool; the GK
+wall stays hard by routing through the same private `_ranked_candidates()`
+helper v1 uses, unweighted.** Not a design choice for GKs -- the GK vector
+space is 6-dim (`goalkeeping_diving/handling/kicking/positioning/reflexes/speed`,
+see Day 6/`compute_vectors.py`) and isn't comparable to the 18-dim outfield
+space at all, so there's no trait-weighting scheme defined for it and none
+was invented. Reusing `_ranked_candidates()` for the v2 GK branch (rather
+than duplicating the GK query) means the two functions can never drift
+apart on GK behavior.
+
+**Relevance set (`curated_v1`) replaces the 3-entry placeholder with 10
+hand-curated query players and 27 relevant-player judgments**, resolved
+from football knowledge to `player_id`s in the dev DB (ambiguous surnames
+-- Bellingham, Vitinha, Laporte, Saliba, Gabriel -- confirmed one at a time
+rather than guessed). Documented in the file itself as one person's
+subjective judgment, not a benchmark, and flagged as leaning toward
+same-position/same-role similarity -- relevant, since v2's whole design
+premise is deviating from strict same-position similarity on purpose.
+
+**Honest v1 vs v2 result (k=10, synchronous `run_evaluation()`, no Celery,
+default `alpha=0.5`, no tuning after seeing the numbers):**
+
+| metric | v1_vector | v2_tactical |
+|---|---|---|
+| mean Precision@10 | 0.0600 | 0.0900 |
+| mean Recall@10 | 0.2667 | 0.3500 |
+| mean NDCG@10 | 0.1688 | 0.2469 |
+| mean position_consistency | 1.0000 | 0.8100 |
+| errors / self-similarity violations | 0 / 0 | 0 / 0 |
+
+v2 outperformed v1 on every relevance metric (Precision/Recall/NDCG@10)
+against `curated_v1` and lost on `position_consistency`, as expected by
+construction -- v1's hard position-group filter makes that metric
+~tautologically 1.0, it doesn't reflect ranking quality, just that the
+filter ran. See `LEARNINGS.md` Day 10 for why the relevance-metric result
+went the opposite direction from the pre-registered expectation ("v2 may
+score worse, and that's fine") -- short version: this particular curated
+set turned out not to be strictly same-position, which structurally
+favors v1 in a way that has nothing to do with v2's actual quality. No
+weights or alpha were changed after seeing this result.

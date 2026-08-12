@@ -7,6 +7,7 @@ testable without a message broker.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 from sqlalchemy.orm import Session
 
@@ -24,18 +25,37 @@ from app.services.similarity import (
     PlayerNotFoundError,
     UnrecognizedPositionError,
     rank_similar,
+    rank_similar_v2,
 )
 
 # Every non-"ok" status corresponds to one of the plain exceptions
-# rank_similar() can raise (Step 0) -- recorded on the query's own result
-# row rather than raised, so one query in an edge state doesn't abort the
-# whole run. "ok" covers a query that ranked successfully even if it
-# returned zero candidates (an empty result is a legitimate outcome of a
-# small position-group pool, not an error).
+# rank_similar() / rank_similar_v2() can raise (Step 0) -- recorded on the
+# query's own result row rather than raised, so one query in an edge state
+# doesn't abort the whole run. "ok" covers a query that ranked successfully
+# even if it returned zero candidates (an empty result is a legitimate
+# outcome of a small position-group pool, not an error).
 STATUS_OK = "ok"
 STATUS_PLAYER_NOT_FOUND = "player_not_found"
 STATUS_UNRECOGNIZED_POSITION = "unrecognized_position"
 STATUS_NO_VECTOR = "no_vector"
+
+# model_version -> ranking function. The harness dispatches through this
+# rather than calling rank_similar() directly, so a new model only needs a
+# registry entry (Step B) -- no branching in run_evaluation/_score_query.
+MODEL_REGISTRY: dict[str, Callable[..., list[int]]] = {
+    "v1_vector": rank_similar,
+    "v2_tactical": rank_similar_v2,
+}
+
+
+class UnknownModelVersionError(Exception):
+    """model_version has no entry in MODEL_REGISTRY."""
+
+    def __init__(self, model_version: str):
+        self.model_version = model_version
+        super().__init__(
+            f"Unknown model_version '{model_version}', expected one of {sorted(MODEL_REGISTRY)}"
+        )
 
 
 @dataclass
@@ -97,9 +117,15 @@ class EvaluationResult:
         return sum(1 for r in self._ok_results() if r.self_similarity_violation)
 
 
-def _score_query(db: Session, query_id: int, relevant_ids: frozenset[int], k: int) -> QueryResult:
+def _score_query(
+    db: Session,
+    query_id: int,
+    relevant_ids: frozenset[int],
+    k: int,
+    rank_fn: Callable[..., list[int]],
+) -> QueryResult:
     try:
-        ranked_ids = rank_similar(db, query_id, limit=k)
+        ranked_ids = rank_fn(db, query_id, limit=k)
     except PlayerNotFoundError:
         return QueryResult(query_id, status=STATUS_PLAYER_NOT_FOUND, num_relevant=len(relevant_ids))
     except UnrecognizedPositionError:
@@ -135,15 +161,19 @@ def run_evaluation(
     model_version: str,
     k: int = 10,
 ) -> EvaluationResult:
-    """Run every query player in relevance_set through rank_similar(),
-    score each ranking against its curated relevant_ids, and return the
-    per-query + aggregate result. model_version is an opaque caller-supplied
-    label (e.g. "v1_vector", "v2_tactical") -- never derived from code
-    introspection, so it stays meaningful across whatever v2 turns out to
-    be.
+    """Run every query player in relevance_set through the ranking function
+    registered under model_version (MODEL_REGISTRY), score each ranking
+    against its curated relevant_ids, and return the per-query + aggregate
+    result. model_version also flows through unchanged onto EvaluationResult
+    as an opaque caller-supplied label -- it's both the dispatch key and the
+    label persisted on the run.
     """
+    rank_fn = MODEL_REGISTRY.get(model_version)
+    if rank_fn is None:
+        raise UnknownModelVersionError(model_version)
+
     query_results = [
-        _score_query(db, query_id, relevance_set.relevant_for(query_id), k)
+        _score_query(db, query_id, relevance_set.relevant_for(query_id), k, rank_fn)
         for query_id in relevance_set.query_player_ids
     ]
 

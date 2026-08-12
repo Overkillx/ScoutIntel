@@ -224,3 +224,38 @@ project-specific choices).
   (Day 8) on two other databases. A green migration check on one database
   is a claim about that database, not about every database an environment
   happens to have lying around.
+
+## Day 10 — v1 vs v2 comparison: a hard filter can win a metric by
+  construction, not by quality
+- **Going in, I expected v2 to lose on the relevance metrics** because a
+  hard same-position-group filter (v1) seemed like it should be a strong
+  prior for "similar player," and a curated relevance set built from
+  football knowledge would probably reward that prior. It didn't play out
+  that way: v2 beat v1 on Precision/Recall/NDCG@10, and only lost on
+  `position_consistency` — which turned out to be the least informative
+  metric of the four, because v1's hard filter makes it ~1.0 by
+  construction. It measures "did the filter run," not "is this a good
+  recommendation." A metric that a design choice can satisfy tautologically
+  isn't evidence that design choice is good.
+- **A relevance set built from football/tactical knowledge is NOT the same
+  thing as a relevance set built from "same position."** I assumed my own
+  curation would implicitly encode a same-position bias (that was the
+  whole premise for expecting v2 to lose), but at least one query
+  (J. Doku, LW) had relevant players (Nico Williams, Y. Diomande) who are
+  both LM in the data — a different position group entirely. v1's hard
+  filter makes that query *structurally* unwinnable for v1: no amount of
+  vector quality could ever surface them, because they're excluded before
+  distance is even computed. v2's relaxed filter at least has a chance —
+  it didn't rank them in the top 10 either, but the ceiling was higher.
+  This is the mechanism, in miniature, for why a same-position assumption
+  baked into evaluation labels can quietly favor whichever model shares
+  that assumption, independent of the models' actual quality.
+- **Relaxing a filter can also hurt a query that didn't need relaxing.**
+  On the Hakimi query (all three relevant players already share Hakimi's
+  own position group), v2 scored lower than v1 (Precision@10 0.1 vs 0.2).
+  Widening the candidate pool to the whole outfield adds competition from
+  players who were never going to be relevant, which can crowd a true
+  positive out of the top-k even when the position-group hard filter
+  would have kept it in. Relaxing a filter is a tradeoff that can cut
+  either way per-query, not a strict improvement, even on a metric where
+  it wins on average.
