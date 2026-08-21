@@ -194,17 +194,14 @@ def test_fails_loudly_on_non_integer_player_id(db_session, make_player, tmp_path
         load_relevance_set(db_session, path)
 
 
-def test_seed_relevance_set_file_is_well_formed(db_session, make_player):
-    """The shipped placeholder file (app/evaluation/relevance_set.yaml)
-    should at least parse and validate as a well-formed relevance set once
-    its referenced players exist -- this is a format check, not a claim
-    that the placeholder judgments are meaningful (they're explicitly not,
-    see the file's header comment).
+def test_seed_relevance_set_file_is_well_formed(db_session, shipped_relevance_set):
+    """The shipped relevance set (app/evaluation/relevance_set.yaml) should
+    parse and validate once its referenced players exist. A format check,
+    not a claim that the judgments themselves are correct -- they're one
+    person's subjective curation, see the file's header comment.
     """
-    for player_id in (231747, 239085, 238794, 252371, 256630, 251854):
-        make_player(player_id)
-
     relevance_set = load_relevance_set(db_session)
 
-    assert relevance_set.dataset_name == "placeholder_v0"
-    assert set(relevance_set.query_player_ids) == {231747, 239085, 252371}
+    assert relevance_set.dataset_name == shipped_relevance_set["dataset_name"]
+    assert set(relevance_set.query_player_ids) == set(shipped_relevance_set["relevance"])
+    assert all(relevance_set.relevant_for(query_id) for query_id in relevance_set.query_player_ids)

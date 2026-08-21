@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 import sys
@@ -5,12 +6,14 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.db.session import get_db
+from app.db.session import configure_engine, get_db
 from app.db.models import GoalkeeperVector, Player, PlayerStats, PlayerVector
+from app.evaluation.relevance import DEFAULT_RELEVANCE_SET_PATH
 from app.main import app
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -65,7 +68,12 @@ def test_database():
 
 @pytest.fixture(scope="session")
 def test_engine(test_database):
-    engine = create_engine(test_database)
+    """Configured through the same configure_engine() the app engine goes
+    through, so tests exercise the real per-connection settings (notably
+    hnsw.iterative_scan) rather than a plainer engine that would rank
+    differently.
+    """
+    engine = configure_engine(create_engine(test_database))
     yield engine
     engine.dispose()
 
@@ -143,3 +151,36 @@ def make_vector(db_session):
         return vector
 
     return _make
+
+
+@pytest.fixture()
+def shipped_relevance_set(make_player, make_vector):
+    """Seed a player + vector for every player_id the shipped relevance set
+    (app/evaluation/relevance_set.yaml) references, and return the file's
+    raw parsed contents.
+
+    Derived from the file rather than from a hard-coded id list on purpose:
+    the two tests that exercise the shipped set are checking that it parses,
+    validates and runs, not that it contains any particular players. An
+    earlier hard-coded list silently went stale the day the placeholder set
+    was replaced with the curated one, failing two tests for a reason that
+    had nothing to do with what they were testing.
+
+    Vectors are placed at evenly spaced angles in the first two dimensions
+    so every distance is well-defined and no two players are coincident.
+    The ranking that results is arbitrary — these are stand-in vectors for
+    plumbing tests, not the real embeddings.
+    """
+    raw = yaml.safe_load(DEFAULT_RELEVANCE_SET_PATH.read_text())
+
+    player_ids = set()
+    for query_id, relevant_ids in raw["relevance"].items():
+        player_ids.add(query_id)
+        player_ids.update(relevant_ids)
+
+    for i, player_id in enumerate(sorted(player_ids)):
+        theta = (i + 1) * math.pi / (2 * (len(player_ids) + 1))
+        make_player(player_id, position="CM")
+        make_vector(player_id, [math.cos(theta), math.sin(theta)] + [0.0] * 16)
+
+    return raw

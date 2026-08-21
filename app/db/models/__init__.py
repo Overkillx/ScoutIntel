@@ -9,6 +9,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, declarative_base
 from pgvector.sqlalchemy import Vector
 
@@ -75,6 +76,12 @@ class EvaluationRun(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     model_version = Column(String, nullable=False)
+    # Keyword arguments the ranking function was called with, e.g.
+    # {"alpha": 0.3}. Null means "the function's own defaults". Stored so a
+    # parameter sweep produces rows that are self-describing -- three
+    # v2_tactical runs at different alphas are otherwise indistinguishable
+    # in the API, and the alpha would only live in someone's shell history.
+    model_params = Column(JSONB, nullable=True)
     dataset_name = Column(String, nullable=False)
     # SHA-256 of the relevance set's content (dataset_name + every
     # query -> relevant_ids judgment). Two runs must not be compared

@@ -71,16 +71,43 @@ def test_task_runs_evaluation_and_persists_it(
 
 
 def test_task_uses_default_relevance_set_path_when_none_given(
-    db_session, make_player, make_vector, patched_task_session
+    db_session, patched_task_session, shipped_relevance_set
 ):
-    # The shipped placeholder file (app/evaluation/relevance_set.yaml)
-    # references these specific player_ids -- see its header comment.
-    for player_id in (231747, 239085, 238794, 252371, 256630, 251854):
-        make_player(player_id, position="ST")
-        make_vector(player_id, outfield_vector(float(player_id % 10) / 10))
-
     run_id = run_evaluation_task(model_version="v1_vector", k=5, relevance_set_path=None)
 
     stored_run = db_session.query(EvaluationRun).filter(EvaluationRun.id == run_id).one()
-    assert stored_run.dataset_name == "placeholder_v0"
-    assert stored_run.num_queries == 3
+    assert stored_run.dataset_name == shipped_relevance_set["dataset_name"]
+    assert stored_run.num_queries == len(shipped_relevance_set["relevance"])
+    assert stored_run.num_errors == 0
+
+
+def test_task_forwards_model_params_to_the_harness(
+    db_session, make_player, make_vector, patched_task_session, tmp_path
+):
+    """The Celery path has to carry hyperparameters through too, or a
+    dispatched sweep would silently run three times at the default alpha.
+    """
+    make_player(1, position="CM")
+    make_vector(1, outfield_vector(1.0))
+    make_player(2, position="CM")
+    make_vector(2, outfield_vector(0.99, rest=0.01))
+
+    relevance_set_path = tmp_path / "relevance_set.yaml"
+    relevance_set_path.write_text(
+        """
+        dataset_name: task_test_v1
+        relevance:
+          1:
+            - 2
+        """
+    )
+
+    run_id = run_evaluation_task(
+        model_version="v2_tactical",
+        k=5,
+        relevance_set_path=str(relevance_set_path),
+        model_params={"alpha": 0.3},
+    )
+
+    stored_run = db_session.query(EvaluationRun).filter(EvaluationRun.id == run_id).one()
+    assert stored_run.model_params == {"alpha": 0.3}

@@ -6,6 +6,12 @@ from pydantic import BaseModel
 class EvaluationRunRequest(BaseModel):
     model_version: str
     k: int = 10
+    # The model's own hyperparameters, forwarded to the ranking function,
+    # e.g. {"alpha": 0.3} for v2_tactical. Omitted means "the function's
+    # own defaults". Validated against the ranking function's signature by
+    # the harness, not here -- the set of valid keys is a property of the
+    # model, so only the model can define it.
+    model_params: dict[str, float] | None = None
     # Path to a relevance set YAML file, overriding the default
     # (app/evaluation/relevance_set.yaml). Optional -- most callers just
     # want the current curated set.
@@ -33,6 +39,7 @@ class EvaluationQueryResultOut(BaseModel):
 class EvaluationRunSummary(BaseModel):
     id: int
     model_version: str
+    model_params: dict[str, float] | None
     dataset_name: str
     dataset_fingerprint: str
     k: int

@@ -7,7 +7,12 @@ from app.evaluation.runner import persist_evaluation_result, run_evaluation
 
 
 @celery_app.task(name="evaluation.run")
-def run_evaluation_task(model_version: str, k: int = 10, relevance_set_path: str | None = None) -> int:
+def run_evaluation_task(
+    model_version: str,
+    k: int = 10,
+    relevance_set_path: str | None = None,
+    model_params: dict | None = None,
+) -> int:
     """Celery entrypoint for the offline evaluation harness.
 
     Opens its own DB session rather than reusing a request-scoped one --
@@ -18,13 +23,20 @@ def run_evaluation_task(model_version: str, k: int = 10, relevance_set_path: str
     calls (Step 3) are unchanged -- this task is only the dispatch wrapper
     around them, not where any evaluation logic lives.
 
+    model_params (the model's own hyperparameters, e.g. {"alpha": 0.3})
+    are forwarded verbatim to run_evaluation, which validates them against
+    the ranking function's signature -- a bad key fails the task rather
+    than being silently dropped.
+
     Returns the new evaluation_runs.id.
     """
     db = SessionLocal()
     try:
         path = Path(relevance_set_path) if relevance_set_path else DEFAULT_RELEVANCE_SET_PATH
         relevance_set = load_relevance_set(db, path)
-        result = run_evaluation(db, relevance_set, model_version=model_version, k=k)
+        result = run_evaluation(
+            db, relevance_set, model_version=model_version, k=k, model_params=model_params
+        )
         run = persist_evaluation_result(db, result)
         db.commit()
         return run.id

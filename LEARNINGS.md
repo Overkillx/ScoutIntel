@@ -259,3 +259,64 @@ project-specific choices).
   would have kept it in. Relaxing a filter is a tradeoff that can cut
   either way per-query, not a strict improvement, even on a metric where
   it wins on average.
+
+## Day 11 — a knob that moves everything and changes nothing measurable
+- **The alpha sweep rearranged the results dramatically and moved the
+  metrics by less than one document.** Not one of the 10 queries returned
+  the same top-10 *ordering* at any two alphas, and some queries shared as
+  few as 5 of 10 members between alpha=0.3 and alpha=0.7 — the parameter is
+  clearly doing something. But the aggregate scores across the three
+  settings span a single relevant hit (8, 9, 9 out of 27 judgments), and
+  the between-alpha spread in NDCG@10 (0.0015) is ~40x smaller than the
+  standard error across queries (0.062–0.083). Two facts that feel
+  contradictory — "the parameter matters a lot" and "the numbers can't tell
+  me which value is better" — are both true at once, and reporting only the
+  second would have been as misleading as reporting only the first.
+- **The temptation to pick a winner was strongest exactly where the
+  evidence was weakest.** alpha=0.7 has the best NDCG *and* ties the best
+  Precision/Recall; writing "0.7 is best, defaulting to it" would have read
+  as a result. It would have been a one-document difference on a 10-query
+  set, i.e. tuning to the eval set — the specific failure this whole
+  harness was built to make visible. Having pre-committed to "show the
+  parameter's effect, don't find a winning number" before running the sweep
+  is what made that easy to hold to afterwards.
+- **A monotonic trend in the direction opposite to my intuition was worth
+  more than the metric it appeared in.** `position_consistency` fell as
+  alpha rose (0.82 → 0.81 → 0.80), where I'd have guessed that weighting
+  the *position* baseline more heavily would return more same-position
+  players. It doesn't, because the baseline is one constant vector per
+  position group — identical for everyone in it, so it carries no pull
+  toward the query player's own position; the player-strengths term, which
+  dominates at *low* alpha, is what implicitly finds same-position players,
+  since players with the same profile tend to play the same role. The
+  trend is 2 ranked players out of 100 and proves nothing, but chasing why
+  it pointed the "wrong" way is what surfaced that the two blended terms
+  don't do what their names suggest.
+- **An approximate index can return a short result and call it success.**
+  pgvector's HNSW index, queried with a filter (every similarity query
+  here filters by position group), can walk the graph, find that its
+  nearest entries mostly fail the filter or aren't visible to the
+  transaction, and return *fewer rows than LIMIT* — no error, no warning,
+  just a top-4 with three entries in it. I found this only because a test
+  asserting an exact hand-computed ranking started failing after an
+  unrelated fixture began inserting more rows: enough dead tuples
+  accumulated for the planner to switch from a seq scan to the HNSW index,
+  and the answer changed. The lesson isn't about pgvector specifically —
+  it's that "ORDER BY distance LIMIT k" reads like an exact operation and
+  silently isn't, once an ANN index is involved. `hnsw.iterative_scan =
+  strict_order` fixes it; noticing was the hard part.
+- **`SET` is transactional, so a connection-level setting that isn't
+  committed isn't set.** The fix above appeared not to work at first: the
+  `SET` ran in the SQLAlchemy `connect` handler, and the *next* `ROLLBACK`
+  on that connection — the per-test rollback, or the one the connection
+  pool issues on return — reverted it. A setting that quietly disappears
+  the first time anything rolls back is worse than one that was never
+  applied, because the code says it's on.
+- **Two tests had been red since Day 10 and I'd been reading past them.**
+  Both hard-coded the six player_ids of the placeholder relevance set, and
+  both broke the moment that file was replaced with the curated one —
+  neither failure had anything to do with what the test was checking. A
+  test that encodes a copy of the data it's testing against will go stale
+  the day the data changes, and the failure it produces points at the wrong
+  thing. Deriving the ids from the file itself makes the test a format
+  check, which is what it always claimed to be.

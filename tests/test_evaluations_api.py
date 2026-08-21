@@ -30,7 +30,12 @@ def test_post_run_dispatches_task_without_touching_a_broker(client, monkeypatch)
 
     assert response.status_code == 202
     assert response.json() == {"task_id": "fake-task-id"}
-    assert captured == {"model_version": "v1_vector", "k": 5, "relevance_set_path": None}
+    assert captured == {
+        "model_version": "v1_vector",
+        "k": 5,
+        "relevance_set_path": None,
+        "model_params": None,
+    }
 
 
 def test_post_run_passes_through_optional_dataset_path(client, monkeypatch):
@@ -51,7 +56,25 @@ def test_post_run_passes_through_optional_dataset_path(client, monkeypatch):
         "model_version": "v2_tactical",
         "k": 20,
         "relevance_set_path": "/tmp/custom.yaml",
+        "model_params": None,
     }
+
+
+def test_post_run_passes_through_model_params(client, monkeypatch):
+    captured = {}
+
+    def fake_delay(**kwargs):
+        captured.update(kwargs)
+        return _FakeAsyncResult("fake-task-id")
+
+    monkeypatch.setattr(run_evaluation_task, "delay", fake_delay)
+
+    client.post(
+        "/api/v1/evaluations/run",
+        json={"model_version": "v2_tactical", "model_params": {"alpha": 0.3}},
+    )
+
+    assert captured["model_params"] == {"alpha": 0.3}
 
 
 def _make_run(db_session, **overrides):
@@ -134,3 +157,21 @@ def test_list_evaluation_runs_summary_has_no_query_results_field(db_session, cli
 
     assert response.status_code == 200
     assert "query_results" not in response.json()[0]
+
+
+def test_list_evaluation_runs_exposes_model_params(db_session, client):
+    """A sweep writes several rows under one model_version; the parameter
+    each was run at has to be visible in the API or the rows are
+    indistinguishable.
+    """
+    _make_run(db_session, model_version="v2_tactical", model_params={"alpha": 0.3})
+    _make_run(db_session, model_version="v2_tactical", model_params={"alpha": 0.7})
+    _make_run(db_session, model_version="v1_vector")
+
+    response = client.get("/api/v1/evaluations/")
+
+    assert response.status_code == 200
+    params = [run["model_params"] for run in response.json()]
+    assert {"alpha": 0.3} in params
+    assert {"alpha": 0.7} in params
+    assert None in params

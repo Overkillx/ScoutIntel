@@ -4,10 +4,12 @@ from app.db.models import EvaluationQueryResult, EvaluationRun
 from app.evaluation.metrics import ndcg_at_k, precision_at_k, recall_at_k
 from app.evaluation.relevance import RelevanceSet, relevance_set_fingerprint
 from app.evaluation.runner import (
+    MODEL_REGISTRY,
     STATUS_NO_VECTOR,
     STATUS_OK,
     STATUS_PLAYER_NOT_FOUND,
     STATUS_UNRECOGNIZED_POSITION,
+    UnknownModelParamError,
     persist_evaluation_result,
     run_evaluation,
 )
@@ -221,3 +223,127 @@ def test_persist_evaluation_result_writes_run_and_query_rows(db_session, known_f
     assert len(stored_query_rows) == 2
     assert {row.query_player_id for row in stored_query_rows} == {1, 5}
     assert all(row.status == STATUS_OK for row in stored_query_rows)
+
+
+@pytest.fixture()
+def recording_model(monkeypatch):
+    """Register a fake ranking function under a throwaway model_version and
+    return the list of kwargs it was called with. Lets the model_params
+    forwarding contract be asserted directly, instead of inferred from
+    whether some real model's ranking happened to change.
+    """
+    calls = []
+
+    def fake_rank(db, player_id, limit=10, alpha=0.5):
+        calls.append({"player_id": player_id, "limit": limit, "alpha": alpha})
+        return []
+
+    monkeypatch.setitem(MODEL_REGISTRY, "fake_model", fake_rank)
+    return calls
+
+
+def test_run_evaluation_forwards_model_params_to_the_ranking_function(
+    db_session, known_fixture, recording_model
+):
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2})})
+
+    result = run_evaluation(
+        db_session,
+        relevance_set,
+        model_version="fake_model",
+        k=4,
+        model_params={"alpha": 0.3},
+    )
+
+    assert recording_model == [{"player_id": 1, "limit": 4, "alpha": 0.3}]
+    assert result.model_params == {"alpha": 0.3}
+
+
+def test_run_evaluation_without_model_params_leaves_the_function_defaults_alone(
+    db_session, known_fixture, recording_model
+):
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2})})
+
+    result = run_evaluation(db_session, relevance_set, model_version="fake_model", k=4)
+
+    assert recording_model == [{"player_id": 1, "limit": 4, "alpha": 0.5}]
+    assert result.model_params == {}
+
+
+def test_run_evaluation_rejects_an_unknown_model_param_before_running_any_query(
+    db_session, known_fixture, recording_model
+):
+    """A typo'd hyperparameter must fail loudly and immediately -- silently
+    ignoring it would produce a run whose recorded params never took effect.
+    """
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2})})
+
+    with pytest.raises(UnknownModelParamError) as exc_info:
+        run_evaluation(
+            db_session,
+            relevance_set,
+            model_version="fake_model",
+            k=4,
+            model_params={"aplha": 0.3},
+        )
+
+    assert "aplha" in str(exc_info.value)
+    assert recording_model == []
+
+
+def test_run_evaluation_rejects_a_model_param_the_harness_owns(
+    db_session, known_fixture, recording_model
+):
+    """`limit` is set from k. Letting a caller override it would produce a
+    run whose metrics are computed at a different cutoff than they claim.
+    """
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2})})
+
+    with pytest.raises(UnknownModelParamError):
+        run_evaluation(
+            db_session,
+            relevance_set,
+            model_version="fake_model",
+            k=4,
+            model_params={"limit": 99},
+        )
+
+
+def test_run_evaluation_rejects_model_params_a_model_does_not_take(db_session, known_fixture):
+    """v1_vector has no hyperparameters at all -- alpha belongs to v2."""
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2})})
+
+    with pytest.raises(UnknownModelParamError):
+        run_evaluation(
+            db_session,
+            relevance_set,
+            model_version="v1_vector",
+            k=4,
+            model_params={"alpha": 0.3},
+        )
+
+
+def test_persist_evaluation_result_records_model_params(db_session, known_fixture):
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2, 4})})
+    result = run_evaluation(
+        db_session, relevance_set, model_version="v2_tactical", k=4, model_params={"alpha": 0.3}
+    )
+
+    run = persist_evaluation_result(db_session, result)
+
+    stored = db_session.query(EvaluationRun).filter(EvaluationRun.id == run.id).one()
+    assert stored.model_params == {"alpha": 0.3}
+
+
+def test_persist_evaluation_result_stores_empty_model_params_as_null(db_session, known_fixture):
+    """"Ran with the function's own defaults" and "ran with no overrides"
+    are the same run, so they get one representation in the DB -- which
+    also keeps rows written before the column existed comparable.
+    """
+    relevance_set = RelevanceSet(dataset_name="known_fixture", judgments={1: frozenset({2, 4})})
+    result = run_evaluation(db_session, relevance_set, model_version="v1_vector", k=4)
+
+    run = persist_evaluation_result(db_session, result)
+
+    stored = db_session.query(EvaluationRun).filter(EvaluationRun.id == run.id).one()
+    assert stored.model_params is None

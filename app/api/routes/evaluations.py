@@ -20,6 +20,7 @@ def trigger_evaluation_run(payload: EvaluationRunRequest):
         model_version=payload.model_version,
         k=payload.k,
         relevance_set_path=payload.dataset_path,
+        model_params=payload.model_params,
     )
     return EvaluationRunTriggerResponse(task_id=async_result.id)
 

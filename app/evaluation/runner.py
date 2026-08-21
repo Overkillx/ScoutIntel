@@ -6,8 +6,9 @@ testable without a message broker.
 """
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -58,6 +59,50 @@ class UnknownModelVersionError(Exception):
         )
 
 
+class UnknownModelParamError(Exception):
+    """model_params contains a keyword the ranking function doesn't accept.
+
+    Raised once up front, before any query runs, rather than letting the
+    TypeError surface per-query from deep inside _score_query. A typo like
+    {"aplha": 0.3} would otherwise either blow up ten times or -- worse, if
+    the ranking function took **kwargs -- be silently ignored, producing a
+    run labelled with a parameter that never took effect.
+    """
+
+    def __init__(self, model_version: str, unknown: set[str], accepted: list[str]):
+        self.unknown = unknown
+        super().__init__(
+            f"Model '{model_version}' does not accept param(s) {sorted(unknown)}; "
+            f"tunable params are {accepted}"
+        )
+
+
+# Positional arguments run_evaluation() supplies itself. They're excluded
+# from the "tunable params" a caller may pass via model_params -- letting a
+# caller override `limit` would silently contradict `k`, which is what
+# every metric is computed at.
+_HARNESS_OWNED_PARAMS = frozenset({"db", "player_id", "limit"})
+
+
+def _tunable_params(rank_fn: Callable[..., list[int]]) -> list[str]:
+    """Keyword parameters of a ranking function a caller may set, i.e. its
+    model hyperparameters (v2's `alpha`) and nothing the harness owns."""
+    return [
+        name
+        for name in inspect.signature(rank_fn).parameters
+        if name not in _HARNESS_OWNED_PARAMS
+    ]
+
+
+def _validate_model_params(
+    model_version: str, rank_fn: Callable[..., list[int]], model_params: dict[str, Any]
+) -> None:
+    accepted = _tunable_params(rank_fn)
+    unknown = set(model_params) - set(accepted)
+    if unknown:
+        raise UnknownModelParamError(model_version, unknown, accepted)
+
+
 @dataclass
 class QueryResult:
     query_player_id: int
@@ -77,6 +122,11 @@ class EvaluationResult:
     dataset_name: str
     dataset_fingerprint: str
     k: int
+    # Hyperparameters the ranking function was called with ({} = its own
+    # defaults). Carried on the result, and persisted, so a run is
+    # self-describing -- three v2_tactical runs at alpha 0.3/0.5/0.7 are
+    # otherwise indistinguishable once written to the DB.
+    model_params: dict[str, Any] = field(default_factory=dict)
     query_results: list[QueryResult] = field(default_factory=list)
 
     @property
@@ -123,9 +173,10 @@ def _score_query(
     relevant_ids: frozenset[int],
     k: int,
     rank_fn: Callable[..., list[int]],
+    model_params: dict[str, Any],
 ) -> QueryResult:
     try:
-        ranked_ids = rank_fn(db, query_id, limit=k)
+        ranked_ids = rank_fn(db, query_id, limit=k, **model_params)
     except PlayerNotFoundError:
         return QueryResult(query_id, status=STATUS_PLAYER_NOT_FOUND, num_relevant=len(relevant_ids))
     except UnrecognizedPositionError:
@@ -160,6 +211,7 @@ def run_evaluation(
     relevance_set: RelevanceSet,
     model_version: str,
     k: int = 10,
+    model_params: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Run every query player in relevance_set through the ranking function
     registered under model_version (MODEL_REGISTRY), score each ranking
@@ -167,13 +219,27 @@ def run_evaluation(
     result. model_version also flows through unchanged onto EvaluationResult
     as an opaque caller-supplied label -- it's both the dispatch key and the
     label persisted on the run.
+
+    model_params are extra keyword arguments forwarded to the ranking
+    function on every query -- the model's own hyperparameters, e.g.
+    {"alpha": 0.3} for v2_tactical. They're validated against the
+    function's signature up front (UnknownModelParamError) and recorded on
+    the result, so a sweep over one parameter produces runs that carry the
+    value they were run at rather than three identically-labelled rows.
+    A model's hyperparameters are deliberately NOT registry keys: alpha is
+    continuous, and "v2_tactical_alpha0.3" as a model_version would make
+    every sweep point look like a distinct model rather than the same model
+    at a different setting.
     """
     rank_fn = MODEL_REGISTRY.get(model_version)
     if rank_fn is None:
         raise UnknownModelVersionError(model_version)
 
+    model_params = dict(model_params or {})
+    _validate_model_params(model_version, rank_fn, model_params)
+
     query_results = [
-        _score_query(db, query_id, relevance_set.relevant_for(query_id), k, rank_fn)
+        _score_query(db, query_id, relevance_set.relevant_for(query_id), k, rank_fn, model_params)
         for query_id in relevance_set.query_player_ids
     ]
 
@@ -182,6 +248,7 @@ def run_evaluation(
         dataset_name=relevance_set.dataset_name,
         dataset_fingerprint=relevance_set_fingerprint(relevance_set),
         k=k,
+        model_params=model_params,
         query_results=query_results,
     )
 
@@ -196,6 +263,11 @@ def persist_evaluation_result(db: Session, result: EvaluationResult) -> Evaluati
     """
     run = EvaluationRun(
         model_version=result.model_version,
+        # {} is stored as NULL, not as an empty object: "the function's own
+        # defaults" and "explicitly no overrides" are the same run, and one
+        # representation for it keeps older rows (written before this
+        # column existed) comparable to new ones.
+        model_params=result.model_params or None,
         dataset_name=result.dataset_name,
         dataset_fingerprint=result.dataset_fingerprint,
         k=result.k,

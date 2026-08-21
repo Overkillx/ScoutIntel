@@ -1,3 +1,5 @@
+from sqlalchemy import text
+
 def outfield_vector(first, rest=0.0):
     return [first] + [rest] * 17
 
@@ -83,3 +85,15 @@ def test_similarity_routes_goalkeepers_to_goalkeeper_vector_table(client, make_p
     ids = [p["player_id"] for p in response.json()]
     assert ids == [2]
     assert 3 not in ids
+
+
+def test_sessions_enable_hnsw_iterative_scan(db_session):
+    """Without this, a filtered nearest-neighbour query can silently return
+    fewer than `limit` rows (the HNSW index is approximate, and a scan that
+    runs out of usable candidates stops short rather than erroring). The
+    setting is applied per connection in app/db/session.py and committed
+    there on purpose -- SET is transactional, so an uncommitted one is
+    reverted by the next ROLLBACK, which is a regression that shows up as
+    occasional short rankings rather than as a failure to connect.
+    """
+    assert db_session.execute(text("SHOW hnsw.iterative_scan")).scalar() == "strict_order"
