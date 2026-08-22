@@ -887,3 +887,54 @@ have made three. Trait name -> dimension index is *derived* from that list,
 never written down, so the query vocabulary cannot drift from the vectors
 it filters on -- an off-by-one there would filter on the wrong attribute
 with no error anywhere.
+
+## Day 13 — README as the presentation layer, and proving the clone runs
+
+**The README leads with the evaluation work, not with a feature list.** The
+previous version opened with the problem statement and a checklist of what
+was built, which describes a to-do list rather than an engineering
+argument. What's actually distinctive here is that the similarity feature
+was measured rather than asserted -- so the rewrite puts the harness, the
+v1-vs-v2 table (including `position_consistency` at 1.0000 for v1 and
+*why* that number is uninformative), the alpha sweep that deliberately
+picks no winner, the NL search boundary, the HNSW benchmark and its
+short-result bug, and the `value_eur` circularity above the fold. Findings
+that don't flatter the design are stated in the README itself rather than
+left in `DECISIONS.md` for someone to discover -- a reader who has to dig
+for the honest parts will reasonably assume there aren't any.
+
+**Fresh-clone verification, run for real rather than reasoned about.** The
+repository was cloned into an empty directory and the README's own
+instructions followed literally: `cp .env.example .env`, `docker compose up
+-d --build`, then ingest, vector computation, the harness, and the test
+suite. All five migrations applied to a genuinely empty database, the API
+came up, both documented `curl` examples returned data, the Celery dispatch
+path ran a task end to end with `model_params` intact, and the full suite
+passed at 131 tests from a fresh venv. This is the same class of check as
+Day 5, which is what caught the silent no-op baseline migration -- a
+migration or a README is a claim about a database and a machine that don't
+exist yet, and the only way to test that claim is to make one.
+
+**Every metric reproduced to four decimal places on the fresh database.**
+v1 at 0.0600 / 0.2667 / 0.1688 / 1.0000 and all three alpha sweep points
+came back identical to the values recorded on Day 10 and Day 11, from a
+re-ingest of the CSV and a recomputation of all 18,405 vectors, against the
+same dataset fingerprint. That's the whole pipeline being deterministic --
+ingest, z-scoring, ranking, scoring -- not just the metrics being read back
+out of a table they were already written to.
+
+**One README defect found and fixed: the test command overrode
+`DATABASE_URL` without saying why.** `.env` resolves the database by its
+Docker Compose service name (`postgres`), which doesn't resolve from the
+host, so a host-side `pytest` fails at import without the override. It
+looked like noise in the command; unexplained, someone would have deleted
+it and hit an error with no obvious cause.
+
+**Two things a fresh clone genuinely cannot do, stated rather than worked
+around.** The dataset is a third-party EA export and isn't committed, so
+the API comes up empty until a CSV is supplied -- the README says so and
+lists the required columns instead of the stack pretending to work.
+And Redis's published host port can collide with a local Redis; it didn't
+collide during verification (Docker binds `0.0.0.0`, the local instance was
+on `127.0.0.1`), but the README's existing "adjust the ports" note is the
+remedy rather than something silently handled.

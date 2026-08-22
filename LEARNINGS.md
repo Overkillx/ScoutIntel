@@ -354,3 +354,33 @@ project-specific choices).
   changing them would silently invalidate every number in Days 10 and 11.
   Writing the test that asserts "this returns 2 when you asked for 10"
   turned a defect I'd have been asked about into a documented trade.
+
+## Day 13 — a README is a claim, and a clone is the only test of it
+- **Every instruction in a README is a claim about a machine that doesn't
+  exist yet.** I've written setup steps before and assumed they worked
+  because they worked *here* — where the venv already existed, the database
+  already had a schema, and the environment variables were already set from
+  three weeks of previous work. Cloning into an empty directory and running
+  only what the README says is the only way to find out which steps were
+  actually load-bearing and which were being silently supplied by my own
+  machine. The one defect it found was exactly that shape: a
+  `DATABASE_URL` override that worked for me either way, and would have
+  been deleted as noise by anyone else because nothing explained it.
+- **Reproducing the metrics from raw CSV was more convincing than the
+  metrics themselves.** Re-ingesting 18,405 players, recomputing all the
+  vectors, and getting NDCG@10 back to the fourth decimal on every one of
+  four runs says something the numbers alone don't: that the pipeline is
+  deterministic end to end, and that the results in DECISIONS.md aren't an
+  artifact of the particular state my dev database happened to be in. I
+  hadn't planned this as a check — it fell out of following the README —
+  and it's the strongest evidence in the project that the evaluation is
+  real.
+- **Writing the README forced me to notice which findings I'd been hiding
+  in plain sight.** The honest results — v2 "losing" on a metric that's
+  tautological, an alpha sweep with no winner, a value signal too circular
+  to build on — were all faithfully recorded in DECISIONS.md, which nobody
+  reads first. Deciding to put them in the README instead of the
+  achievements was uncomfortable in a way that turned out to be the tell:
+  a reader who has to dig for the caveats will assume there aren't any, and
+  the caveats are the part that shows the work was measured rather than
+  asserted.
