@@ -115,7 +115,7 @@ Changed to `is not None`. Separately, `get_player` returned
 - No `requirements.txt` — the repo can't currently be run from a clone.
 - API routes build response dicts by hand; no Pydantic response models.
 
-## Day 4 — Repositioning after data-premise review
+## Day 4b — Repositioning after data-premise review
 
 Ran a correlation check: value_eur vs overall (r=0.55), potential (r=0.50),
 age (r=0.02). Confirms value_eur is meaningfully but not fully derived from

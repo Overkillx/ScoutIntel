@@ -184,6 +184,15 @@ project-specific choices).
   sequential scans without having to actually drop and recreate the index,
   making an honest with/without benchmark cheap to run.
 
+## Day 7 — no entry
+
+Day 7 was extracting the ranking core into plain service functions so the
+evaluation harness could call it (`DECISIONS.md` Day 7 has the reasoning).
+It was a pure refactor, verified by the existing test suite passing
+unchanged, and nothing about it surprised me or turned out to be wrong —
+so there's nothing to record here. Noted explicitly rather than left as a
+silent gap in the numbering.
+
 ## Day 8 — Evaluation runner + results schema
 
 - **`alembic revision --autogenerate` flags an index it doesn't know about
