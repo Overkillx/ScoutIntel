@@ -192,7 +192,9 @@ work can be dispatched to the Celery worker with
 ### Tests
 
 The suite needs a Postgres it can create and drop databases on. The Compose
-Postgres works; point `TEST_DATABASE_URL` at it:
+Postgres works; point `TEST_DATABASE_URL` at it. `DATABASE_URL` is set on
+the same line because `.env` resolves the database by its Compose service
+name (`postgres`), which doesn't resolve from the host:
 
 ```bash
 python3 -m venv venv
