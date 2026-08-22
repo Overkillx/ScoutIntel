@@ -1,20 +1,7 @@
 import pandas as pd
+from app.core.attributes import GOALKEEPER_ATTRIBUTES, OUTFIELD_ATTRIBUTES
 from app.db.session import SessionLocal
 from app.db.models import Player, PlayerVector, GoalkeeperVector
-
-OUTFIELD_ATTRIBUTES = [
-    "attacking_crossing", "attacking_finishing", "attacking_short_passing",
-    "skill_long_passing", "skill_ball_control", "skill_dribbling",
-    "movement_acceleration", "movement_agility", "movement_balance",
-    "movement_reactions", "power_shot_power", "power_jumping",
-    "power_stamina", "power_strength", "mentality_aggression",
-    "mentality_vision", "mentality_composure", "defending_standing_tackle",
-]
-
-GOALKEEPER_ATTRIBUTES = [
-    "goalkeeping_diving", "goalkeeping_handling", "goalkeeping_kicking",
-    "goalkeeping_positioning", "goalkeeping_reflexes", "goalkeeping_speed",
-]
 
 
 def compute_vectors(csv_path="data/FC26_20250921.csv", session=None):

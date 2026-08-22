@@ -320,3 +320,37 @@ project-specific choices).
   the day the data changes, and the failure it produces points at the wrong
   thing. Deriving the ids from the file itself makes the test a format
   check, which is what it always claimed to be.
+
+## Day 12 — the boundary is the return type
+- **"Don't let the model write SQL" is a property of a function signature,
+  not a rule to remember.** I started out thinking about this as a policy
+  — sanitize the output, allowlist the statements, use a read-only role.
+  All of those are filters on a string, and each one is a bet that nobody
+  finds the case it misses. Making the parser's return type a Pydantic
+  model with `extra="forbid"`, and giving it no database session at all,
+  moves the guarantee from "we check carefully" to "there is no code path".
+  The test I'm happiest with posts `'; DROP TABLE players; --` inside an
+  otherwise ordinary query and asserts the parse contains only the fields
+  it recognised — the injection isn't blocked, it's simply never anything.
+- **The ambiguous cases in a natural-language parser are mostly ordinary
+  English, not adversarial input.** "like" is an anchor keyword and also a
+  filler word ("players like fast wingers"). "under 20" is an age and
+  "under 20m" is a fee, differing by one character. "Long" is a trait word
+  and also Shane Long. Every one of those was found by writing example
+  sentences a scout would actually type, not by thinking about attacks —
+  and each one, unfixed, produces a *confident wrong answer* rather than an
+  error, which is the failure mode that matters for a system whose whole
+  job is to be trusted.
+- **Showing the interpretation is the feature.** Returning the parsed
+  `SearchQuery` next to the results started as a debugging convenience and
+  turned out to be the thing that makes the endpoint defensible: a natural
+  language interface that only returns results is asking to be trusted,
+  while one that shows what it understood can be checked by the person who
+  asked. The same argument as the evaluation harness, one layer up.
+- **Reusing the ranking functions unchanged forced a limitation I'd
+  otherwise have hidden.** Filtering after ranking means a strict filter
+  can return fewer than k results. The tempting fix is to push filters into
+  `rank_similar`, and it's wrong: the harness measured those functions, so
+  changing them would silently invalidate every number in Days 10 and 11.
+  Writing the test that asserts "this returns 2 when you asked for 10"
+  turned a defect I'd have been asked about into a documented trade.

@@ -22,11 +22,10 @@ from app.evaluation.metrics import (
 )
 from app.evaluation.relevance import RelevanceSet, relevance_set_fingerprint
 from app.services.similarity import (
+    MODEL_REGISTRY,
     NoVectorError,
     PlayerNotFoundError,
     UnrecognizedPositionError,
-    rank_similar,
-    rank_similar_v2,
 )
 
 # Every non-"ok" status corresponds to one of the plain exceptions
@@ -40,13 +39,11 @@ STATUS_PLAYER_NOT_FOUND = "player_not_found"
 STATUS_UNRECOGNIZED_POSITION = "unrecognized_position"
 STATUS_NO_VECTOR = "no_vector"
 
-# model_version -> ranking function. The harness dispatches through this
-# rather than calling rank_similar() directly, so a new model only needs a
-# registry entry (Step B) -- no branching in run_evaluation/_score_query.
-MODEL_REGISTRY: dict[str, Callable[..., list[int]]] = {
-    "v1_vector": rank_similar,
-    "v2_tactical": rank_similar_v2,
-}
+# MODEL_REGISTRY (model_version -> ranking function) is imported from
+# app/services/similarity.py rather than defined here. The harness
+# dispatches through it so a new model only needs a registry entry -- no
+# branching in run_evaluation/_score_query -- and natural-language search
+# resolves the same labels through the same dict.
 
 
 class UnknownModelVersionError(Exception):

@@ -86,7 +86,8 @@ OUTFIELD_POSITIONS = [pos for pos, group in POSITION_GROUPS.items() if group != 
 # Position-group baseline trait weights: round, hand-set proxy scores
 # (1 = low relevance, 3 = high relevance) for how much each of the 18
 # outfield dims matters for a player in that group. Order matches
-# OUTFIELD_ATTRIBUTES in compute_vectors.py:
+# OUTFIELD_ATTRIBUTES in app/core/attributes.py, which is the single source
+# of truth for what dimension i means:
 #   [crossing, finishing, short_pass, long_pass, ball_control, dribbling,
 #    acceleration, agility, balance, reactions, shot_power, jumping,
 #    stamina, strength, aggression, vision, composure, standing_tackle]
@@ -190,3 +191,15 @@ def rank_similar_v2(db: Session, player_id: int, limit: int = 10, alpha: float =
         key=lambda c: _weighted_cosine_distance(target.embedding, c.embedding, weights),
     )
     return [c.player_id for c in ranked[:limit]]
+
+
+# model_version label -> ranking function. Lives here, beside the functions
+# it names, because two independent callers need the same mapping: the
+# offline evaluation harness (app/evaluation/runner.py) dispatches through
+# it, and natural-language search resolves SearchQuery.model_version
+# through it. A second copy in either place would be a way for "v2_tactical"
+# to mean two different things.
+MODEL_REGISTRY = {
+    "v1_vector": rank_similar,
+    "v2_tactical": rank_similar_v2,
+}

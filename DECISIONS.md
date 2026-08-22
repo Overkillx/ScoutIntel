@@ -770,3 +770,120 @@ were testing. The shared `shipped_relevance_set` fixture parses
 `relevance_set.yaml`, seeds a player and a stand-in vector for every id it
 references, and returns the parsed file so assertions can be written
 against it. The next dataset swap won't break them.
+
+## Day 12 — Natural-language search: NL -> structured JSON, never NL -> SQL
+
+**The parser emits a validated Pydantic model and nothing else. No
+model-authored SQL reaches the database, by construction rather than by
+review.** The obvious way to build this feature is text-to-SQL: hand the
+sentence to something that writes a query and run what comes back. That
+puts an untrusted generator inside the trust boundary, and every defence
+after that point is a filter on a string -- allowlists, statement parsers,
+read-only roles -- each of which is a claim that nobody will find the case
+it misses. `parse_query(text) -> SearchQuery` has no such surface: the
+function's return type IS the boundary. Its output is a `SearchQuery` whose
+fields are bounded numbers (`k` in 1-50, ages in 14-50), closed enums
+(`Position`, `PositionGroup`, `Trait`, `Foot`, `ModelVersion`), and exactly
+one free-text value -- an anchor player's name. That name never becomes SQL
+either: it resolves through a parameterized SQLAlchemy filter whose only
+product is an integer `player_id`. The widest thing a sentence can do to
+this database is select an integer.
+
+Three things make that boundary hold rather than merely be intended:
+`extra="forbid"` on `SearchQuery`, so a parser bug that invents a field
+fails validation instead of quietly attaching an unvalidated value;
+`parse_query` taking no `Session`, so it structurally cannot query anything
+even if it wanted to; and a test that posts
+`"'; DROP TABLE players; -- fast midfielders under 25"` to the endpoint,
+asserts the parse contains only `{position_group, traits, max_age}`, and
+then proves the table still exists by querying it again.
+
+**A keyword/regex grammar, not a model.** Explicitly no LLM call and no new
+dependency -- `re` and Pydantic, both already present. The grammar is
+exhaustively enumerable (every phrase it understands is in one of three
+tables in `app/search/parser.py`), deterministic, and unit-testable with no
+database and no network, which is why the parser is a pure function of a
+string rather than a method on a service. The cost is stated rather than
+hidden: it understands its vocabulary and nothing else, and says so in the
+error it raises. That is the correct trade for a portfolio project where
+the interesting claim is about the architecture, not about parsing English.
+
+**Rules run in a fixed order and blank out the span they consume**, so no
+substring is read by two rules. Two orderings are load-bearing. Fees are
+extracted before ages, because `"under 20m"` and `"under 20"` differ only
+by a unit -- distinguishing them by magnitude ("20 is too small to be a
+fee") would be a silent misreading of a query the user thought was
+unambiguous, so a fee must carry a unit or a currency symbol and an age
+must not. And the anchor player's name is extracted before positions and
+traits, so a name can never be mined for keywords.
+
+**A name stops at a clause boundary and at single-word vocabulary terms.**
+`"similar to Kevin De Bruyne but younger than 25"` must not send the
+retrieval layer looking for a player called "Kevin De Bruyne but younger",
+and `"players like fast wingers"` is a description, not a player named
+"fast wingers" -- `"like"` is both an anchor keyword and an ordinary
+English word. Only *single-word* vocabulary terms block a name token:
+excluding every token of every multi-word phrase would eat real surnames
+(Shane **Long**, from the "long passing" trait). Both cases are tests, not
+comments.
+
+**Two failure modes, separated because their fixes differ.**
+`UnparseableQueryError` means nothing matched -- the message quotes the
+input and lists the vocabulary, and `"top 5"` alone counts as unparseable
+because it sets `k` but expresses no intent, and answering it would mean
+returning five arbitrary players as though they'd been asked for.
+`InvalidQueryError` means the sentence parsed but the structured query
+failed validation (`"under 30 and over 35"`, `"top 500"`), and carries the
+validator's own message. Ambiguity that needs the database -- `"Silva"`
+matching 155 players -- belongs to resolution, not parsing:
+`AmbiguousPlayerNameError` lists up to five candidates *with their ids* and
+the total count, so the caller can disambiguate in one round trip instead
+of guessing. Silently taking the first match would attribute a scouting
+result to a player nobody named.
+
+**Filters are applied AFTER ranking, over an overfetched candidate list,
+rather than pushed into the ranking functions.** `rank_similar` and
+`rank_similar_v2` are called exactly as the evaluation harness calls them,
+so the thing being served is the same function that was measured -- pushing
+a position or age filter inside would break that equivalence and quietly
+invalidate every number in Day 10 and Day 11. The cost is real and is
+documented rather than papered over: a strict filter can leave fewer than
+`k` results, and overfetching (10x `k`, capped at 300) widens the pool but
+cannot conjure matches that don't exist. There's a test asserting exactly
+that, so the limitation is pinned rather than discovered later.
+
+**Traits filter on the z-scored embedding itself: "above average on this
+trait" is `component > 0`.** No threshold invented, no new column, no
+second source of truth about what "fast" means. It also falls out of this
+that goalkeepers can't satisfy a trait filter -- their 6-dim space has no
+`dribbling` dimension to be above average on -- and they drop out rather
+than being special-cased into passing, which is the honest answer.
+
+**Results carry a `rank`, not a distance.** v1's distance is a plain cosine
+distance over 18 equally-weighted dims; v2's is a weighted cosine whose
+weight vector is derived per query player, so its scale differs from query
+to query and is not comparable to v1's. A number that looks comparable
+across models but isn't would be worse than no number.
+
+**A query with no anchor player runs as a plain filter search, ordered by
+`overall`.** `"fast wingers under 21"` names no one to be similar to, so
+there's no similarity signal to rank by. `overall` is the one available
+ordering that doesn't smuggle in a judgment: `value_eur` correlates with
+`overall` at r=0.55 (Day 4), so ordering by it would make the result partly
+a restatement of the market's opinion rather than of the data.
+
+**`MODEL_REGISTRY` moved from `app/evaluation/runner.py` to
+`app/services/similarity.py`, beside the functions it names.** Two
+independent callers now need the same label -> function mapping: the
+offline harness dispatches through it, and search resolves
+`SearchQuery.model_version` through it. A second copy in either place would
+be a way for `"v2_tactical"` to come to mean two different things.
+
+**`app/core/attributes.py` is now the single source of truth for embedding
+dimension order.** `OUTFIELD_ATTRIBUTES` previously lived in
+`compute_vectors.py` with the order restated as a comment in
+`app/services/similarity.py`; the search parser needed it too, which would
+have made three. Trait name -> dimension index is *derived* from that list,
+never written down, so the query vocabulary cannot drift from the vectors
+it filters on -- an off-by-one there would filter on the wrong attribute
+with no error anywhere.
